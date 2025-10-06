@@ -10,15 +10,15 @@ OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 print("OPENAI_KEY ",OPENAI_KEY)
 PERSIST_DIR = "vector_db/chroma_db"
 os.makedirs(PERSIST_DIR, exist_ok=True)
-embedding = OpenAIEmbeddings()
+embedding = OpenAIEmbeddings(model="text-embedding-3-small")
 vectorstore = Chroma(
     collection_name="book_summaries",
     embedding_function=embedding,
     persist_directory=PERSIST_DIR
 )
 
-def add_book_to_vector_db(book_id: str, title: str, author: str):
-    summary = summary_chain.invoke({
+async def add_book_to_vector_db(book_id: str, title: str, author: str):
+    summary = await summary_chain.ainvoke({
         "title": title,
         "author": author
     })

@@ -12,3 +12,4 @@ class QuizRequest(BaseModel):
 class EvaluateRequest(BaseModel):
     book_id: str
     user_answers: List[str]
+    questions:List[str]

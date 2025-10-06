@@ -1,60 +1,76 @@
 from langgraph.graph import StateGraph
-from langgraph.graph.message import add_messages
-from app.prompts import quiz_chain, evaluation_chain
-from app.vector_store import get_relevant_summary
-from typing import TypedDict, List
+# from langgraph.graph.message import add_messages
+from app.prompts import  evaluation_chain,feedback_chain
+from typing import TypedDict, List,Optional
 
 class QuizState(TypedDict):
-    book_id: str
+    # book_id: str
     quiz: str
     user_answers: List[str]
-    evaluation: str
+    evaluation: Optional[str]
+    score: Optional[float]
+    feedback: Optional[str]
 
 # --- Nodes ---
-class QuizNode:
-    def run(self, state: dict):
-        # Get book summary
-        book_id = state.get("book_id")
-        if not book_id:
-            raise ValueError("book_id is missing in state")
+# class QuizNode:
+#     def run(self, state: dict):
+#         # Get book summary
+#         book_id = state.get("book_id")
+#         if not book_id:
+#             raise ValueError("book_id is missing in state")
 
-        summary = get_relevant_summary(book_id)
+#         summary = get_relevant_summary(book_id)
 
-        # Run the quiz generation pipeline
-        quiz = quiz_chain.invoke({"context": summary})
+#         # Run the quiz generation pipeline
+#         quiz = quiz_chain.ainvoke({"context": summary})
 
-        return {"quiz": quiz}
+#         return {"quiz": quiz}
 
 
 class EvaluationNode:
-    def run(self, state: dict):
-        questions = state.get("quiz")
-        user_answers = state.get("user_answers")
-
-        if not questions or not user_answers:
-            raise ValueError("Quiz questions or user answers missing in state.")
-
-        eval_result = evaluation_chain.invoke({
-            "questions": questions,
-            "user_answers": user_answers
+    async def run(self, state: QuizState):
+        evaluation_result = await evaluation_chain.ainvoke({
+            "questions": state["quiz"],
+            "user_answers": state["user_answers"]
         })
 
-        return {"evaluation": eval_result}
+        score = evaluation_result.get("score", 0)
+        evaluation_text = evaluation_result.get("feedback", "")
+        return {"evaluation": evaluation_text, "score": score}
 
-def create_quiz_graph():
+
+class FeedbackNode:
+    async def run(self, state: QuizState):
+        score = state.get("score", 0)
+        quiz = state.get("quiz", "")
+
+        if score < 3:
+            feedback_text = await feedback_chain.ainvoke({
+                "quiz": quiz,
+                "evaluation": state["evaluation"],
+                "score":score,
+                "instruction": (
+                    "Based on user's mistakes, suggest pages or sections "
+                    "from the quiz or book they should reread."
+                )
+            })
+        else:
+            feedback_text = "Great job! You’ve answered most questions correctly. ✅"
+
+        return {"feedback": feedback_text}
+
+def evaluate_quiz_graph():
     # Create a workflow graph for the quiz
     workflow = StateGraph(QuizState)
 
     # Add nodes with the updated run methods
-    workflow.add_node("QuizNode", QuizNode().run)
     workflow.add_node("EvaluationNode", EvaluationNode().run)
+    workflow.add_node("FeedbackNode", FeedbackNode().run)
 
-    # Define the flow between nodes
-    workflow.add_edge("QuizNode", "EvaluationNode")
+    workflow.add_edge("EvaluationNode", "FeedbackNode")
 
-    # Set entry and exit points
-    workflow.set_entry_point("QuizNode")
-    workflow.set_finish_point("EvaluationNode")
+    workflow.set_entry_point("EvaluationNode")
+    workflow.set_finish_point("FeedbackNode")
 
     # Compile the graph to make it executable
     compiled_workflow = workflow.compile()
